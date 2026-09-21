@@ -1,17 +1,3 @@
-"""
-Early Warning System for Academically At-Risk Students
-------------------------------------------------------
-Pure Python website built with Streamlit.
-
-Run:
-    pip install streamlit pandas numpy
-    streamlit run early_warning_app.py
-
-Everything you may want to edit is grouped at the top (USERS, FACTORS,
-THRESHOLDS, RECOMMENDATIONS). Risk scores are also adjustable live from the
-"Risk Settings" page once you log in as admin or teacher.
-"""
-
 import copy
 import datetime as dt
 import os
