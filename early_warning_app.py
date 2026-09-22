@@ -1,7 +1,7 @@
 import copy
 import datetime as dt
 import os
-
+import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -175,7 +175,29 @@ def visible_data(scored: pd.DataFrame) -> pd.DataFrame:
         return scored[scored["student_id"] == user["id"]]
     return scored
 
+def fixed_0_100_bar_chart(series: pd.Series, height: int = 380, label_angle: int = 0):
+    data = series.round(1).reset_index()
+    data.columns = ["Category", "Value"]
 
+    chart = (
+        alt.Chart(data)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "Category:N",
+                axis=alt.Axis(labelAngle=label_angle)
+            ),
+            y=alt.Y(
+                "Value:Q",
+                scale=alt.Scale(domain=[0, 100], nice=False),
+                axis=alt.Axis(values=list(range(0, 101, 10)))
+            ),
+            tooltip=["Category:N", "Value:Q"],
+        )
+        .properties(height=height)
+    )
+
+    st.altair_chart(chart, use_container_width=True)
 def page_overview(scored):
     st.header("📊 Overview")
     days_left = (st.session_state.exam_date - dt.date.today()).days
@@ -193,17 +215,17 @@ def page_overview(scored):
     left, right = st.columns(2)
     with left:
         st.subheader("Risk level distribution")
-        st.bar_chart(scored["risk_level"].value_counts().reindex(["High", "Medium", "Low"]).fillna(0))
+        fixed_0_100_bar_chart(scored["risk_level"].value_counts().reindex(["High", "Medium", "Low"]).fillna(0))
     with right:
         st.subheader("Average risk by department")
-        st.bar_chart(scored.groupby("department")["risk_score"].mean().round(1))
+        fixed_0_100_bar_chart(scored.groupby("department")["risk_score"].mean().round(1))
 
     st.subheader("Most common risk reasons")
     reasons = pd.Series([r for lst in scored[scored.risk_level != "Low"]["reasons"] for r in lst])
     if reasons.empty:
         st.write("None 🎉")
     else:
-        st.bar_chart(reasons.value_counts())
+       fixed_0_100_bar_chart(reasons.value_counts())
 
 
 def page_at_risk(scored):
@@ -252,7 +274,7 @@ def page_student_detail(scored):
     with left:
         st.markdown("**Risk contribution by factor**")
         chart = pd.Series({cfg["label"]: row[f"risk_{k}"] for k, cfg in factors.items()})
-        st.bar_chart(chart)
+        fixed_0_100_bar_chart(chart)
     with right:
         st.markdown("**Why flagged**")
         if row.reasons:
