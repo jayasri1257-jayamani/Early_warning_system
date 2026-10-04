@@ -1,7 +1,10 @@
 import copy
 import datetime as dt
 import os
+import html
+
 import altair as alt
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -129,6 +132,73 @@ def recommendations_for(row: pd.Series, factors: dict) -> list:
 LEVEL_ICON = {"High": "🔴 High", "Medium": "🟠 Medium", "Low": "🟢 Low"}
 
 
+# Presentation helpers keep the risk engine and source records unchanged.
+RISK_COLORS = {"Low": "#45d6b0", "Medium": "#ffc56d", "High": "#ff7896"}
+
+
+def apply_theme():
+    st.markdown("""<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    :root {color-scheme: dark;}
+    .stApp {background: radial-gradient(ellipse at 85% 0%, #252044 0%, transparent 45%), #0b1120; color:#eaf0ff;}
+    html, body, [class*="css"], .stApp {font-family:Inter,system-ui,sans-serif;}
+    .block-container {max-width:1440px;padding-top:2.5rem;padding-bottom:3rem;}
+    [data-testid="stSidebar"] {background:#10182a;border-right:1px solid #ffffff12;}
+    h1,h2,h3 {letter-spacing:-.035em;color:#f2f5ff;}
+    [data-testid="stMetric"], [data-testid="stForm"], .glass {
+      background:linear-gradient(135deg,#ffffff09,#ffffff03);border:1px solid #ffffff14;
+      border-radius:18px;padding:20px;box-shadow:0 12px 32px #00000022;}
+    [data-testid="stMetric"] {transition:transform .2s ease, border-color .2s ease;}
+    @media (hover:hover) {[data-testid="stMetric"]:hover {transform:perspective(900px) translateY(-3px) rotateX(2deg);border-color:#63dce655;}}
+    [data-testid="stMetricValue"] {color:#edf4ff;font-weight:700;}
+    .eyebrow {color:#79dce8;font-size:.75rem;letter-spacing:.16em;text-transform:uppercase;font-weight:700;}
+    .hero {padding:26px 30px;margin-bottom:24px;background:linear-gradient(120deg,#15243b,#24203c);border:1px solid #ffffff16;border-radius:22px;}
+    .hero h1 {font-size:2.4rem;margin:.35rem 0 .5rem;}
+    .hero p {color:#bbc6dc;margin:0;line-height:1.65;}
+    .badge {display:inline-block;border-radius:30px;padding:6px 13px;font-size:.85rem;font-weight:700;margin:8px 0;}
+    .stButton button,.stDownloadButton button,.stFormSubmitButton button {border-radius:12px;transition:transform .18s ease,box-shadow .18s ease;}
+    .stButton button:hover,.stDownloadButton button:hover,.stFormSubmitButton button:hover {transform:translateY(-2px);box-shadow:0 6px 20px #5c5cff22;}
+    button:focus-visible {outline:2px solid #79dce8!important;outline-offset:3px;}
+    [data-testid="stDataFrame"] {border-radius:14px;overflow:hidden;}
+    @keyframes enter {from {opacity:0;transform:translateY(6px)} to {opacity:1;transform:translateY(0)}}
+    .hero {animation:enter .35s ease-out;}
+    @media(max-width:700px) {.block-container {padding:1.2rem;} .hero {padding:20px;} .hero h1 {font-size:1.8rem;} [data-testid="stHorizontalBlock"] {flex-wrap:wrap;} [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {min-width:min(100%,220px);flex:1 1 220px;}}
+    @media(prefers-reduced-motion:reduce) {*,*::before,*::after {animation:none!important;transition:none!important;transform:none!important;}}
+    </style>""", unsafe_allow_html=True)
+
+
+def hero(title, subtitle, eyebrow="Academic intelligence"):
+    st.markdown(f'<div class="hero"><div class="eyebrow">{html.escape(eyebrow)}</div><h1>{html.escape(title)}</h1><p>{html.escape(subtitle)}</p></div>', unsafe_allow_html=True)
+
+
+def risk_legend():
+    th = st.session_state.thresholds
+    st.caption(f"Risk score /100 · Low < {th['medium']} · Medium {th['medium']}–< {th['high']} · High ≥ {th['high']}. Higher scores indicate greater support needs.")
+
+
+def bar_chart(data, label, value, domain=None, risk_colors=False):
+    encoding = dict(x=alt.X(f"{value}:Q", title=value, scale=alt.Scale(domain=domain) if domain else alt.Scale(zero=True)),
+                    y=alt.Y(f"{label}:N", title=None, sort=None),
+                    tooltip=[alt.Tooltip(f"{label}:N"), alt.Tooltip(f"{value}:Q", format=".1f")])
+    if risk_colors:
+        encoding["color"] = alt.Color(f"{label}:N", scale=alt.Scale(domain=list(RISK_COLORS), range=list(RISK_COLORS.values())), legend=None)
+    chart = alt.Chart(data).mark_bar(color="#79dce8", cornerRadiusEnd=5).encode(**encoding).properties(height=max(160, len(data)*38))
+    chart = chart.configure_view(strokeOpacity=0).configure_axis(labelColor="#bdc9df", titleColor="#bdc9df", gridColor="#ffffff12", labelLimit=260).configure(background="#10192b")
+    st.altair_chart(chart, use_container_width=True)
+
+
+def student_profile(row):
+    color = RISK_COLORS[row.risk_level]
+    hero(str(row['name']), f"{row.student_id} · {row.department} · Semester {row.semester} · Mentor: {row.mentor}", "Student profile")
+    st.markdown(f'<span class="badge" style="color:{color};background:{color}18;border:1px solid {color}55">{html.escape(row.risk_level)} academic risk · {row.risk_score:.1f} / 100</span>', unsafe_allow_html=True)
+    st.progress(min(int(row.risk_score), 100), text="Academic risk score")
+    risk_legend()
+    items = list(st.session_state.factors.items())
+    for start in range(0, len(items), 3):
+        for col, (key, cfg) in zip(st.columns(3), items[start:start+3]):
+            col.metric(cfg["label"], f"{row[key]:g}", help=f"Target: {cfg['target']}. Weight: {cfg['weight']}.")
+
+
 # ----------------------------------------------------------------------------
 # 4. STATE + LOGIN
 # ----------------------------------------------------------------------------
@@ -141,8 +211,8 @@ def init_state():
 
 
 def login_screen():
-    st.title(APP_TITLE)
-    st.caption("Detect students who need academic support before final exams.")
+    hero("Support starts with insight.", "An early view of academic risk, so every student gets the right support before finals.", "Early Warning System")
+    st.subheader("Sign in to your workspace")
     with st.form("login"):
         username = st.text_input("Username / Student ID")
         password = st.text_input("Password", type="password")
@@ -158,9 +228,7 @@ def login_screen():
             st.rerun()
         else:
             st.error("Invalid credentials.")
-    with st.expander("Demo logins"):
-        st.write("**admin / admin123**, **teacher1 / teacher123**, **mentor1 / mentor123**")
-        st.write(f"Student: any Student ID (e.g. **S1001**) with password **{STUDENT_DEFAULT_PASSWORD}**")
+    st.caption("Demo roles: Administrator, Teacher, Mentor and Student. Use your configured credentials.")
 
 
 # ----------------------------------------------------------------------------
@@ -175,57 +243,36 @@ def visible_data(scored: pd.DataFrame) -> pd.DataFrame:
         return scored[scored["student_id"] == user["id"]]
     return scored
 
-def fixed_0_100_bar_chart(series: pd.Series, height: int = 380, label_angle: int = 0):
-    data = series.round(1).reset_index()
-    data.columns = ["Category", "Value"]
 
-    chart = (
-        alt.Chart(data)
-        .mark_bar()
-        .encode(
-            x=alt.X(
-                "Category:N",
-                axis=alt.Axis(labelAngle=label_angle)
-            ),
-            y=alt.Y(
-                "Value:Q",
-                scale=alt.Scale(domain=[0, 100], nice=False),
-                axis=alt.Axis(values=list(range(0, 101, 10)))
-            ),
-            tooltip=["Category:N", "Value:Q"],
-        )
-        .properties(height=height)
-    )
-
-    st.altair_chart(chart, use_container_width=True)
 def page_overview(scored):
-    st.header("📊 Overview")
-    days_left = (st.session_state.exam_date - dt.date.today()).days
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Students", len(scored))
-    c2.metric("High risk", int((scored.risk_level == "High").sum()))
-    c3.metric("Medium risk", int((scored.risk_level == "Medium").sum()))
-    c4.metric("Avg attendance", f"{scored.attendance.mean():.1f}%")
-    c5.metric("Days to finals", max(days_left, 0))
-
+    hero("Academic overview", "Understand the current cohort, identify support priorities, and act early.", st.session_state.user["role"] + " workspace")
+    risk_legend()
     if scored.empty:
-        st.info("No students to show.")
+        st.info("No students to show in your assigned cohort.")
         return
-
+    counts = scored.risk_level.value_counts().reindex(["Low", "Medium", "High"], fill_value=0)
+    for col, label, value in zip(st.columns(4), ["Students in view", "High risk", "Medium risk", "Low risk"], [len(scored), counts.High, counts.Medium, counts.Low]):
+        col.metric(label, int(value))
+    st.caption("All summaries reflect only students visible to your role. Sample data is generated by the original app until a CSV is uploaded.")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Average attendance", f"{scored.attendance.mean():.1f}%")
+    c2.metric("Average risk", f"{scored.risk_score.mean():.1f} / 100")
+    c3.metric("Days to finals", max((st.session_state.exam_date-dt.date.today()).days, 0))
     left, right = st.columns(2)
     with left:
-        st.subheader("Risk level distribution")
-        fixed_0_100_bar_chart(scored["risk_level"].value_counts().reindex(["High", "Medium", "Low"]).fillna(0))
+        st.subheader("Risk distribution")
+        bar_chart(counts.rename_axis("Risk level").reset_index(name="Students"), "Risk level", "Students", [0, max(len(scored), 1)], True)
     with right:
-        st.subheader("Average risk by department")
-        fixed_0_100_bar_chart(scored.groupby("department")["risk_score"].mean().round(1))
-
-    st.subheader("Most common risk reasons")
-    reasons = pd.Series([r for lst in scored[scored.risk_level != "Low"]["reasons"] for r in lst])
+        st.subheader("Risk by department")
+        data = scored.groupby("department", sort=True).risk_score.mean().round(1).rename_axis("Department").reset_index(name="Average risk")
+        bar_chart(data, "Department", "Average risk", [0, 100])
+    st.subheader("Support priorities")
+    reasons = pd.Series([r for lst in scored[scored.risk_level != "Low"].reasons for r in lst], dtype="object")
     if reasons.empty:
-        st.write("None 🎉")
+        st.info("No factors exceed the alert level among medium- or high-risk students.")
     else:
-       fixed_0_100_bar_chart(reasons.value_counts())
+        bar_chart(reasons.value_counts().rename_axis("Factor").reset_index(name="Students flagged"), "Factor", "Students flagged", [0, len(scored)])
+    st.caption("Counts can overlap: a student may be flagged for multiple factors. Charts show current records, with no smoothing or simulated trends.")
 
 
 def page_at_risk(scored):
@@ -240,13 +287,15 @@ def page_at_risk(scored):
         view = view[view.department.isin(dept)]
     if search:
         s = search.lower()
-        view = view[view.name.str.lower().str.contains(s) | view.student_id.str.lower().str.contains(s)]
+        view = view[view.name.str.lower().str.contains(s, regex=False, na=False) | view.student_id.str.lower().str.contains(s, regex=False, na=False)]
     view = view.sort_values("risk_score", ascending=False)
 
     table = view[["student_id", "name", "department", "semester", "mentor", "attendance",
                   "internal_marks", "risk_score", "risk_level", "reasons"]].copy()
     table["risk_level"] = table["risk_level"].map(LEVEL_ICON)
     table["reasons"] = table["reasons"].apply(", ".join)
+    st.caption(f"{len(table)} students match your filters · Sorted by highest risk first")
+    risk_legend()
     st.dataframe(table, use_container_width=True, hide_index=True)
     st.download_button("⬇️ Download this list (CSV)", table.to_csv(index=False), "at_risk_students.csv")
 
@@ -262,19 +311,14 @@ def page_student_detail(scored):
     row = scored[scored.student_id == sid].iloc[0]
     factors = st.session_state.factors
 
-    st.subheader(f"{row['name']}  ({LEVEL_ICON[row.risk_level]})")
-    st.caption(f"{row.department} • Semester {row.semester} • Mentor: {row.mentor}")
-    st.progress(min(int(row.risk_score), 100), text=f"Risk score: {row.risk_score}/100")
-
-    cols = st.columns(len(factors))
-    for col, (key, cfg) in zip(cols, factors.items()):
-        col.metric(cfg["label"], row[key])
+    student_profile(row)
 
     left, right = st.columns(2)
     with left:
-        st.markdown("**Risk contribution by factor**")
+        st.markdown("**Individual factor risk**")
         chart = pd.Series({cfg["label"]: row[f"risk_{k}"] for k, cfg in factors.items()})
-        fixed_0_100_bar_chart(chart)
+        bar_chart(chart.rename_axis("Factor").reset_index(name="Factor risk"), "Factor", "Factor risk", [0, 100])
+        st.caption("Each factor is scored independently /100. The overall score is their weighted average.")
     with right:
         st.markdown("**Why flagged**")
         if row.reasons:
@@ -298,6 +342,9 @@ def page_student_detail(scored):
 
 def page_interventions(scored):
     st.header("📝 Record Support / Intervention")
+    if scored.empty:
+        st.info("No students available for an intervention.")
+        return
     labels = {r.student_id: f"{r.student_id} – {r['name']} ({r.risk_level})" for _, r in scored.iterrows()}
     with st.form("intervention"):
         sid = st.selectbox("Student", list(labels), format_func=labels.get)
@@ -321,13 +368,27 @@ def page_data():
     st.download_button("⬇️ Download template / sample CSV", template.to_csv(index=False), "students_template.csv")
     file = st.file_uploader("Upload student data (CSV)", type="csv")
     if file:
-        new = pd.read_csv(file)
-        missing = [c for c in REQUIRED_COLUMNS if c not in new.columns]
-        if missing:
-            st.error(f"Missing columns: {missing}")
-        else:
-            st.session_state.df = new[REQUIRED_COLUMNS]
-            st.success(f"Loaded {len(new)} students.")
+        try:
+            new = pd.read_csv(file, dtype={"student_id": str})
+            missing = [c for c in REQUIRED_COLUMNS if c not in new.columns]
+            if missing:
+                st.error(f"Missing columns: {missing}")
+            elif new.empty or new[REQUIRED_COLUMNS].isna().any().any():
+                st.error("Upload at least one complete student record. Missing values are not accepted.")
+            elif new.student_id.duplicated().any():
+                st.error("Student IDs must be unique.")
+            else:
+                candidate = new[REQUIRED_COLUMNS].copy()
+                numeric = ["semester"] + list(FACTORS)
+                candidate[numeric] = candidate[numeric].apply(pd.to_numeric, errors="raise")
+                if not np.isfinite(candidate[numeric].to_numpy(dtype=float)).all():
+                    raise ValueError("Numeric values must be finite.")
+                for column in ["student_id", "name", "department", "mentor"]:
+                    candidate[column] = candidate[column].astype(str)
+                st.session_state.df = candidate
+                st.success(f"Loaded {len(candidate)} students.")
+        except (ValueError, pd.errors.ParserError, UnicodeDecodeError):
+            st.error("Could not load this CSV. Check its encoding, column structure and numeric values. Current data has been kept.")
     if st.button("Reset to sample data"):
         st.session_state.df = generate_sample_data()
         st.rerun()
@@ -342,11 +403,11 @@ def page_settings():
     th = st.session_state.thresholds
     c1, c2 = st.columns(2)
     th["high"] = c1.slider("High-risk score from", 0, 100, th["high"])
-    th["medium"] = c2.slider("Medium-risk score from", 0, 100, min(th["medium"], th["high"]))
+    th["medium"] = c2.slider("Medium-risk score from", 0, th["high"], min(th["medium"], th["high"])) if th["high"] > 0 else 0
     st.markdown("**Factor targets & weights**")
     for key, cfg in st.session_state.factors.items():
         a, b = st.columns(2)
-        cfg["target"] = a.number_input(f"{cfg['label']} – target", value=float(cfg["target"]), key=f"t_{key}")
+        cfg["target"] = a.number_input(f"{cfg['label']} – target", value=float(cfg["target"]), min_value=0.01, key=f"t_{key}")
         cfg["weight"] = b.number_input(f"{cfg['label']} – weight", value=float(cfg["weight"]), min_value=0.0, key=f"w_{key}")
 
 
@@ -357,12 +418,7 @@ def page_my_status(scored):
         return
     row = scored.iloc[0]
     factors = st.session_state.factors
-    st.subheader(f"Hello, {row['name']}")
-    st.metric("Current risk level", LEVEL_ICON[row.risk_level])
-    st.progress(min(int(row.risk_score), 100), text=f"Risk score: {row.risk_score}/100")
-    cols = st.columns(len(factors))
-    for col, (key, cfg) in zip(cols, factors.items()):
-        col.metric(cfg["label"], row[key], help=f"Target: {cfg['target']}")
+    student_profile(row)
     st.markdown("**Where you can improve**")
     for rec in recommendations_for(row, factors):
         st.write(f"✅ {rec}")
@@ -374,6 +430,7 @@ def page_my_status(scored):
 # ----------------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="Early Warning System", page_icon="🎓", layout="wide")
+    apply_theme()
     init_state()
 
     if not st.session_state.user:
@@ -384,7 +441,8 @@ def main():
     scored_all = score_students(st.session_state.df, st.session_state.factors, st.session_state.thresholds)
     scored = visible_data(scored_all)
 
-    st.sidebar.title("🎓 EWS")
+    st.sidebar.markdown("### ◈ Academic Insight")
+    st.sidebar.caption("EARLY WARNING SYSTEM")
     st.sidebar.write(f"**{user['name']}**  \n{user['role']}")
 
     pages = {
